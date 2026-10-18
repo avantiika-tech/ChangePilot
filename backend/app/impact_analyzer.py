@@ -124,3 +124,53 @@ def analyze_python_project(
         findings.extend(analyze_python_file(file_path))
 
     return findings
+
+
+
+def match_changes_to_calls(
+    changes: list[dict[str, Any]],
+    findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Match API changes to Python calls using HTTP method and URL path."""
+    import re
+
+    results = []
+
+    for change in changes:
+        method = change.get("method", "").upper()
+        api_path = change.get("path", "")
+
+        # Convert OpenAPI path parameters to URL path segments.
+        # Example: /users/{id} -> /users/[^/]+
+        pattern = re.sub(r"\{[^/]+\}", r"[^/]+", api_path)
+        pattern = f"^{pattern.rstrip('/')}/?$"
+
+        affected_calls = []
+
+        for finding in findings:
+            if finding.get("method") != method:
+                continue
+
+            url = finding.get("url")
+            if not url:
+                continue
+
+            from urllib.parse import urlparse
+
+            request_path = urlparse(url).path
+
+            if re.match(pattern, request_path):
+                affected_calls.append({
+                    "file": finding["file"],
+                    "line": finding["line"],
+                    "call": finding["call"],
+                    "url": url,
+                })
+
+        results.append({
+            "change": change,
+            "affected_calls": affected_calls,
+            "potential_impact_count": len(affected_calls),
+        })
+
+    return results
