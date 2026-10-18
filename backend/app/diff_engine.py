@@ -25,11 +25,52 @@ def get_operations(spec):
         if not isinstance(path_item, dict):
             continue
 
+        path_parameters = path_item.get("parameters", [])
+        if not isinstance(path_parameters, list):
+            path_parameters = []
+
         for method, details in path_item.items():
             if method.lower() in HTTP_METHODS and isinstance(details, dict):
-                operations[(method.lower(), path)] = details
+                operations[(method.lower(), path)] = {
+                    **details,
+                    "_path_parameters": path_parameters,
+                }
 
     return operations
+
+
+def get_parameters(operation):
+    parameters = {}
+
+    combined = (
+        operation.get("_path_parameters", [])
+        + operation.get("parameters", [])
+    )
+
+    for parameter in combined:
+        if not isinstance(parameter, dict):
+            continue
+
+        name = parameter.get("name")
+        location = parameter.get("in")
+
+        if name and location:
+            parameters[(location, name)] = parameter
+
+    return parameters
+
+
+def add_change(changes, change_type, severity, method, path,
+               message, evidence, breaking=True):
+    changes.append({
+        "type": change_type,
+        "severity": severity,
+        "breaking": breaking,
+        "method": method.upper(),
+        "path": path,
+        "message": message,
+        "evidence": evidence,
+    })
 
 
 def compare_specs(old_spec, new_spec):
@@ -39,21 +80,101 @@ def compare_specs(old_spec, new_spec):
     changes = []
 
     for method, path in sorted(old_operations.keys() - new_operations.keys()):
-        changes.append({
-            "type": "removed_endpoint",
-            "severity": "high",
-            "method": method.upper(),
-            "path": path,
-            "message": f"{method.upper()} {path} was removed.",
-        })
+        add_change(
+            changes, "removed_endpoint", "high", method, path,
+            f"{method.upper()} {path} was removed.",
+            {"old_endpoint": f"{method.upper()} {path}",
+             "new_endpoint": None},
+        )
 
     for method, path in sorted(new_operations.keys() - old_operations.keys()):
-        changes.append({
-            "type": "added_endpoint",
-            "severity": "info",
-            "method": method.upper(),
-            "path": path,
-            "message": f"{method.upper()} {path} was added.",
-        })
+        add_change(
+            changes, "added_endpoint", "info", method, path,
+            f"{method.upper()} {path} was added.",
+            {"old_endpoint": None,
+             "new_endpoint": f"{method.upper()} {path}"},
+            breaking=False,
+        )
+
+    for method, path in sorted(old_operations.keys() & new_operations.keys()):
+        old_params = get_parameters(old_operations[(method, path)])
+        new_params = get_parameters(new_operations[(method, path)])
+
+        for location, name in sorted(old_params.keys() - new_params.keys()):
+            old_param = old_params[(location, name)]
+            was_required = old_param.get("required", False)
+
+            add_change(
+                changes,
+                "removed_parameter",
+                "high" if was_required else "medium",
+                method, path,
+                f"Parameter '{name}' in '{location}' was removed.",
+                {
+                    "parameter": name,
+                    "in": location,
+                    "old_required": was_required,
+                    "new_parameter": None,
+                },
+                breaking=was_required,
+            )
+
+        for location, name in sorted(new_params.keys() - old_params.keys()):
+            new_param = new_params[(location, name)]
+            is_required = new_param.get("required", False)
+
+            add_change(
+                changes,
+                "added_parameter",
+                "high" if is_required else "info",
+                method, path,
+                f"Parameter '{name}' in '{location}' was added.",
+                {
+                    "parameter": name,
+                    "in": location,
+                    "old_parameter": None,
+                    "new_required": is_required,
+                },
+                breaking=is_required,
+            )
+
+        for location, name in sorted(old_params.keys() & new_params.keys()):
+            old_param = old_params[(location, name)]
+            new_param = new_params[(location, name)]
+
+            old_required = old_param.get("required", False)
+            new_required = new_param.get("required", False)
+
+            if not old_required and new_required:
+                add_change(
+                    changes,
+                    "parameter_became_required",
+                    "high", method, path,
+                    f"Parameter '{name}' is now required.",
+                    {
+                        "parameter": name,
+                        "in": location,
+                        "old_required": False,
+                        "new_required": True,
+                    },
+                )
+
+            old_type = old_param.get("schema", {}).get("type")
+            new_type = new_param.get("schema", {}).get("type")
+
+            if old_type and new_type and old_type != new_type:
+                add_change(
+                    changes,
+                    "parameter_type_changed",
+                    "high", method, path,
+                    f"Parameter '{name}' type changed from "
+                    f"'{old_type}' to '{new_type}'.",
+                    {
+                        "parameter": name,
+                        "in": location,
+                        "old_type": old_type,
+                        "new_type": new_type,
+                    },
+                )
 
     return changes

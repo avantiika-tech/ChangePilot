@@ -3,16 +3,22 @@ openapi: 3.1.0
 info:
   title: Customer API
   version: 2.0.0
+
 paths:
-  /customers/{id}:
+  /users/{id}:
     get:
-      operationId: getCustomer
+      operationId: getUser
       parameters:
         - name: id
           in: path
           required: true
           schema:
-            type: integer
+            type: string
+        - name: include
+          in: query
+          required: true
+          schema:
+            type: string
       responses:
         "200":
-          description: Customer found
+          description: User found
