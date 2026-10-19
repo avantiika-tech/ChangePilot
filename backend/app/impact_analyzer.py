@@ -216,8 +216,6 @@ def analyze_python_file(file_path: str | Path) -> list[dict[str, Any]]:
             continue
 
         url = _extract_url(node, constants)
-        if url is None:
-            continue
 
         finding = {
             "file": str(path),
@@ -226,6 +224,7 @@ def analyze_python_file(file_path: str | Path) -> list[dict[str, Any]]:
             "url": url,
             "call": _get_call_name(node.func),
         }
+
 
         params = _extract_static_params(node, constants)
         if params is not None:

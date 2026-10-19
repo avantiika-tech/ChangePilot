@@ -256,3 +256,63 @@ def test_end_to_end_spec_diff_and_python_impact(tmp_path):
     affected_call = include_impacts[0]["affected_calls"][0]
     assert affected_call["parameter_status"] == "missing_from_literal_url"
     assert affected_call["required_parameter"] == "include"
+
+
+
+def test_analyzer_resolves_url_constant(tmp_path):
+    sample_file = tmp_path / "client.py"
+    sample_file.write_text(
+        'import requests\n'
+        'BASE_URL = "https://api.example.com"\n'
+        'requests.get(BASE_URL + "/users/123")\n',
+        encoding="utf-8",
+    )
+
+    findings = analyze_python_file(sample_file)
+
+    assert len(findings) == 1
+    assert findings[0]["method"] == "GET"
+    assert findings[0]["url"] == "https://api.example.com/users/123"
+
+
+def test_detects_required_query_parameter_in_params_dict():
+    change = {
+        "type": "added_parameter",
+        "method": "GET",
+        "path": "/users/{id}",
+        "evidence": {
+            "parameter": "include",
+            "in": "query",
+            "new_required": True,
+        },
+    }
+
+    finding = {
+        "file": "client.py",
+        "line": 5,
+        "call": "requests.get",
+        "method": "GET",
+        "url": "https://api.example.com/users/123",
+        "params": {"include": "orders"},
+    }
+
+    impacts = match_changes_to_calls([change], [finding])
+    affected_call = impacts[0]["affected_calls"][0]
+
+    assert affected_call["parameter_status"] == "present"
+
+
+def test_dynamic_url_is_not_reported_as_literal_url(tmp_path):
+    sample_file = tmp_path / "client.py"
+    sample_file.write_text(
+        'import requests\n'
+        'user_id = get_user_id()\n'
+        'requests.get(f"https://api.example.com/users/{user_id}")\n',
+        encoding="utf-8",
+    )
+
+    findings = analyze_python_file(sample_file)
+
+    assert len(findings) == 1
+    assert findings[0]["method"] == "GET"
+    assert findings[0]["url"] is None
