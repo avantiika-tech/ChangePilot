@@ -149,3 +149,110 @@ def test_matches_api_change_to_affected_call():
 
     assert results[0]["potential_impact_count"] == 1
     assert results[0]["affected_calls"][0]["call"] == "requests.get"
+
+
+
+def test_detects_missing_required_query_parameter():
+    change = {
+        "type": "added_parameter",
+        "method": "GET",
+        "path": "/users/{id}",
+        "evidence": {
+            "parameter": "include",
+            "in": "query",
+            "old_parameter": None,
+            "new_required": True,
+        },
+    }
+
+    finding = {
+        "file": "client.py",
+        "line": 10,
+        "call": "requests.get",
+        "method": "GET",
+        "url": "https://api.example.com/users/123",
+    }
+
+    from app.impact_analyzer import match_changes_to_calls
+
+    impacts = match_changes_to_calls([change], [finding])
+
+    assert len(impacts) == 1
+    assert impacts[0]["potential_impact_count"] == 1
+
+    affected_call = impacts[0]["affected_calls"][0]
+    assert affected_call["required_parameter"] == "include"
+    assert affected_call["parameter_status"] == "missing_from_literal_url"
+
+
+
+def test_detects_present_required_query_parameter():
+    change = {
+        "type": "added_parameter",
+        "method": "GET",
+        "path": "/users/{id}",
+        "evidence": {
+            "parameter": "include",
+            "in": "query",
+            "new_required": True,
+        },
+    }
+
+    finding = {
+        "file": "client.py",
+        "line": 12,
+        "call": "requests.get",
+        "method": "GET",
+        "url": "https://api.example.com/users/123?include=orders",
+    }
+
+    from app.impact_analyzer import match_changes_to_calls
+
+    impacts = match_changes_to_calls([change], [finding])
+
+    affected_call = impacts[0]["affected_calls"][0]
+    assert affected_call["required_parameter"] == "include"
+    assert affected_call["parameter_status"] == "present"
+
+
+
+def test_end_to_end_spec_diff_and_python_impact(tmp_path):
+    from pathlib import Path
+    from app.diff_engine import load_spec, compare_specs
+    from app.impact_analyzer import (
+        analyze_python_project,
+        match_changes_to_calls,
+    )
+
+    project_root = Path(__file__).resolve().parents[1]
+
+    old_spec = load_spec(project_root / "samples" / "v1.yaml")
+    new_spec = load_spec(project_root / "samples" / "v2.yaml")
+
+    changes = compare_specs(old_spec, new_spec)
+
+    client_file = tmp_path / "client.py"
+    client_file.write_text(
+        'import requests\n'
+        'requests.get("https://api.example.com/users/123")\n',
+        encoding="utf-8",
+    )
+
+    findings = analyze_python_project(tmp_path)
+    impacts = match_changes_to_calls(changes, findings)
+
+    assert len(findings) == 1
+    assert len(impacts) == len(changes)
+
+    include_impacts = [
+        impact
+        for impact in impacts
+        if impact["change"].get("type") == "added_parameter"
+        and impact["change"].get("evidence", {}).get("parameter") == "include"
+    ]
+
+    assert len(include_impacts) == 1
+
+    affected_call = include_impacts[0]["affected_calls"][0]
+    assert affected_call["parameter_status"] == "missing_from_literal_url"
+    assert affected_call["required_parameter"] == "include"

@@ -178,3 +178,31 @@ def compare_specs(old_spec, new_spec):
                 )
 
     return changes
+
+
+
+from pathlib import Path
+from app.impact_analyzer import analyze_python_project
+
+
+def test_end_to_end_spec_diff_and_python_impact(tmp_path):
+    project_root = Path(__file__).resolve().parents[1]
+    old_spec = load_spec(project_root / "samples" / "v1.yaml")
+    new_spec = load_spec(project_root / "samples" / "v2.yaml")
+
+    changes = compare_specs(old_spec, new_spec)
+
+    client_file = tmp_path / "client.py"
+    client_file.write_text(
+        'import requests\n'
+        'requests.get("https://api.example.com/users/123")\n',
+        encoding="utf-8",
+    )
+
+    findings = analyze_python_project(tmp_path)
+    impacts = match_changes_to_calls(changes, findings)
+
+    assert isinstance(changes, list)
+    assert isinstance(findings, list)
+    assert isinstance(impacts, list)
+    assert len(impacts) == len(changes)
