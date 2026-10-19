@@ -285,12 +285,28 @@ def match_changes_to_calls(
             if not re.match(pattern, parsed_url.path):
                 continue
 
+            
             affected_call = {
                 "file": finding.get("file"),
                 "line": finding.get("line"),
                 "call": finding.get("call"),
                 "url": url,
+                "match_evidence": {
+                    "http_method_matches": True,
+                    "api_path": api_path,
+                    "matched_request_path": parsed_url.path,
+                },
             }
+
+            parameter_evidence = change.get("evidence", {})
+
+            if parameter_evidence.get("in") == "path":
+                affected_call["parameter_evidence"] = {
+                    "parameter": parameter_evidence.get("parameter"),
+                    "location": "path",
+                    "old_type": parameter_evidence.get("old_type"),
+                    "new_type": parameter_evidence.get("new_type"),
+                }
 
             # Check whether a newly required query parameter is supplied.
             if (
@@ -319,11 +335,18 @@ def match_changes_to_calls(
 
                 if isinstance(parameter_name, str) and parameter_name:
                     affected_call["required_parameter"] = parameter_name
-                    affected_call["parameter_status"] = (
-                        "present"
-                        if parameter_name in present_names
-                        else "missing_from_literal_url"
-                    )
+                    affected_call["parameter_location"] = evidence.get("in", "query")
+
+                    if parameter_name in present_names:
+                        affected_call["parameter_status"] = "present"
+                        affected_call["parameter_source"] = (
+                            "params_dict"
+                            if isinstance(params, dict) and parameter_name in params
+                            else "url_query"
+                        )
+                    else:
+                        affected_call["parameter_status"] = "missing_from_literal_url"
+                        affected_call["parameter_source"] = None
 
             affected_calls.append(affected_call)
 
