@@ -1,4 +1,5 @@
-﻿from typing import Any
+﻿
+from typing import Any
 
 
 MIGRATION_GUIDANCE = {
@@ -25,6 +26,15 @@ MIGRATION_GUIDANCE = {
 }
 
 
+PATCH_ACTIONS = {
+    "removed_endpoint": "manual_replacement_required",
+    "removed_parameter": "inspect_and_remove_parameter",
+    "added_parameter": "inspect_parameter_requirements",
+    "parameter_became_required": "supply_value_from_application_data",
+    "parameter_type_changed": "inspect_and_convert_value",
+}
+
+
 def generate_migration_plan(
     change_matches: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -48,6 +58,8 @@ def generate_migration_plan(
                 "Review the API change and update affected calls manually.",
             )
 
+        patch_action = PATCH_ACTIONS.get(change_type, "manual_review_required")
+
         plan.append({
             "change_type": change_type,
             "severity": change.get("severity", "unknown"),
@@ -59,10 +71,12 @@ def generate_migration_plan(
             "affected_calls": affected_calls,
             "affected_call_count": len(affected_calls),
             "recommendation": recommendation,
-            "requires_manual_review": breaking or change_type == "unknown",
+            "requires_manual_review": (
+                breaking or change_type == "unknown"
+            ),
             "patch": None,
             "patch_status": "not_generated",
+            "patch_action": patch_action,
         })
 
     return plan
-
